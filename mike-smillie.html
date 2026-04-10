@@ -604,7 +604,10 @@
       </div>
     </div>
     <div class="export-box">
-      <div class="export-title">📊 Session Tasks</div>
+      <div class="export-title">🗑️ Reset Session Data</div>
+      <div class="export-sub">Only use this after you have synced your data with Claude and updated your spreadsheet. This clears all locally saved tasks and hours from this device.</div>
+      <button class="btn-copy" onclick="clearLocalData()" style="border-color:rgba(224,82,82,0.4);color:#e05252;">Clear Saved Data</button>
+    </div>
       <div class="export-sub">Tasks logged this session:</div>
       <div id="sessionSummary" class="export-text">No tasks logged yet.</div>
     </div>
@@ -732,6 +735,75 @@
 // DATA
 // ═══════════════════════════════════════════════════════════════════
 const TODAY = new Date();
+
+// ── localStorage helpers ──────────────────────────────────────────
+const STORAGE_KEY = 'vessellog_mike';
+
+function saveState() {
+  try {
+    const toSave = {
+      portHrs: state.portHrs,
+      stbdHrs: state.stbdHrs,
+      loggedTasks: state.loggedTasks,
+      engineTaskOverrides: engineTasks.map(t => ({
+        name: t.name,
+        port: { lastDate: t.port.lastDate, lastHrs: t.port.lastHrs, nextHrs: t.port.nextHrs, nextDate: t.port.nextDate },
+        stbd: { lastDate: t.stbd.lastDate, lastHrs: t.stbd.lastHrs, nextHrs: t.stbd.nextHrs, nextDate: t.stbd.nextDate },
+      })),
+      inventoryStock: inventory.map(i => ({ id: i.id, stock: i.stock })),
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  } catch(e) { console.warn('Save failed:', e); }
+}
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+    const data = JSON.parse(saved);
+    if (data.portHrs) state.portHrs = data.portHrs;
+    if (data.stbdHrs) state.stbdHrs = data.stbdHrs;
+    if (data.loggedTasks) state.loggedTasks = data.loggedTasks;
+    // Restore engine task last dates/hours
+    if (data.engineTaskOverrides) {
+      data.engineTaskOverrides.forEach(override => {
+        const task = engineTasks.find(t => t.name === override.name);
+        if (task) {
+          task.port.lastDate = override.port.lastDate;
+          task.port.lastHrs  = override.port.lastHrs;
+          task.port.nextHrs  = override.port.nextHrs;
+          task.port.nextDate = override.port.nextDate;
+          task.stbd.lastDate = override.stbd.lastDate;
+          task.stbd.lastHrs  = override.stbd.lastHrs;
+          task.stbd.nextHrs  = override.stbd.nextHrs;
+          task.stbd.nextDate = override.stbd.nextDate;
+        }
+      });
+    }
+    // Restore inventory stock levels
+    if (data.inventoryStock) {
+      data.inventoryStock.forEach(s => {
+        const item = inventory.find(i => i.id === s.id);
+        if (item) item.stock = s.stock;
+      });
+    }
+    // Sync hour inputs
+    document.getElementById('portHrs').value = state.portHrs;
+    document.getElementById('stbdHrs').value = state.stbdHrs;
+  } catch(e) { console.warn('Load failed:', e); }
+}
+
+function clearLocalData() {
+  if (!confirm('This will clear all saved tasks and hours from this device. Only do this after syncing with Claude. Are you sure?')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  state.loggedTasks = [];
+  state.portHrs = 360;
+  state.stbdHrs = 364;
+  document.getElementById('portHrs').value = 360;
+  document.getElementById('stbdHrs').value = 364;
+  showToast('Local data cleared');
+  renderAll();
+}
 
 let state = {
   portHrs: 360,
@@ -1093,10 +1165,11 @@ function showTab(tab) {
 }
 
 function updateHours() {
-  state.portHrs = parseInt(document.getElementById('portHrs').value) || 349;
-  state.stbdHrs = parseInt(document.getElementById('stbdHrs').value) || 354;
+  state.portHrs = parseInt(document.getElementById('portHrs').value) || 360;
+  state.stbdHrs = parseInt(document.getElementById('stbdHrs').value) || 364;
   document.getElementById('portHrsDisplay').textContent = state.portHrs + ' hrs';
   document.getElementById('stbdHrsDisplay').textContent = state.stbdHrs + ' hrs';
+  saveState();
   renderDashboard();
   renderEngineList();
 }
@@ -1256,6 +1329,7 @@ function submitLog() {
     }
   });
 
+  saveState();
   closeLogForm();
   const stockMsg = stockChange ? ` · ${stockChange.partName} → ${stockChange.newStock} in stock` : '';
   showToast(`✓ ${task} logged${stockMsg}`);
@@ -1359,6 +1433,7 @@ function init() {
   const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   document.getElementById('headerDate').textContent = `${days[now.getDay()]} ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+  loadState();
   renderAll();
 }
 
